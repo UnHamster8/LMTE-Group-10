@@ -20,3 +20,11 @@ class LexicalError(PebbleError):
 
 class ParseError(PebbleError):
     category = "Syntax error"
+
+
+class ValidationError(PebbleError):
+    category = "Validation error"
+
+
+class EvaluationError(PebbleError):
+    category = "Runtime error"

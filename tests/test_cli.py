@@ -17,10 +17,10 @@ class CLITests(unittest.TestCase):
         self.addCleanup(temporary_directory.cleanup)
         self.folder = Path(temporary_directory.name)
 
-    def run_cli(self, source_path: Path) -> subprocess.CompletedProcess[str]:
+    def run_cli(self, source_path: Path, *options: str) -> subprocess.CompletedProcess[str]:
         # Use the same Python interpreter that runs the tests.
         return subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "main.py"), str(source_path)],
+            [sys.executable, str(PROJECT_ROOT / "main.py"), *options, str(source_path)],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
@@ -31,7 +31,7 @@ class CLITests(unittest.TestCase):
         source_path = self.folder / "valid.peb"
         source_path.write_text("let x = 12;", encoding="utf-8")
 
-        result = self.run_cli(source_path)
+        result = self.run_cli(source_path, "--tokens")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
