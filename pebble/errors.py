@@ -16,3 +16,7 @@ class PebbleError(Exception):
 
 class LexicalError(PebbleError):
     category = "Lexical error"
+
+
+class ParseError(PebbleError):
+    category = "Syntax error"

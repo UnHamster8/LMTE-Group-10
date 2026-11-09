@@ -1,11 +1,11 @@
 # Pebble — Group 10
 
 A Python 3 interpreter project for the Pebble language. This starter implements
-the lexical analysis stage from the group design plan.
+the lexer and basic expression and statement parsing.
 
-**Current status:** source files can be converted into tokens. Parsing, semantic
-validation and execution are still to be implemented, so `say` does not print
-program results yet.
+**Current status:** the lexer tokenizes all examples. The parser builds an AST
+for `let`, `say` and basic expressions. Control flow, functions, semantic
+validation and execution are planned.
 
 ## Requirements and running
 
@@ -31,11 +31,13 @@ main.py                   Read a file and display its tokens
 pebble/
     tokens.py             Token kinds, keyword lookup and Token data class
     lexer.py              Hand-written finite-state scanner
-    errors.py             Shared error format and lexical errors
-    parser.py             Parser interface for the next stage (placeholder)
+    errors.py             Shared error format, lexical errors and syntax errors
+    ast_nodes.py          AST nodes for basic expressions and statements
+    parser.py             Recursive-descent parser
     evaluator.py          Evaluation interface for a later stage (placeholder)
 examples/                 Sample Pebble source files
 tests/test_lexer.py       Lexical rules, source positions and error tests
+tests/test_parser.py      Basic AST structure, precedence and syntax errors
 tests/test_cli.py         Command-line token output and error tests
 ```
 
@@ -84,11 +86,10 @@ The remaining pipeline is:
 source → Lexer → tokens → Parser → AST → validation → Evaluator → output
 ```
 
-`Parser(tokens).parse()` and `Evaluator().evaluate(program)` deliberately raise
-`NotImplementedError` until those components are written. The parser author
-should define the AST node classes and replace the temporary `Any` annotations
-in these interfaces. Add semantic validation before connecting evaluation to
-`main.py`.
+`Parser(tokens).parse()` returns an `ast_nodes.Program` for the syntax in
+`examples/basic.peb`. Its `items` are statements in source order. A syntax
+error raises `ParseError` with a reason and one-based line and column.
+`Evaluator().evaluate(program)` remains a placeholder.
 
 ## Planned execution rules
 
