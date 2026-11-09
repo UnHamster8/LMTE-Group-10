@@ -1,0 +1,6 @@
+// Expected output after evaluation: 12.
+func twice(x) do
+    return x * 2;
+end
+
+say twice(6);
