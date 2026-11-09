@@ -48,9 +48,22 @@ class BinaryExpression:
     column: int
 
 
+@dataclass(frozen=True)
+class Call:
+    callee: Name
+    arguments: tuple[Expression, ...]
+    line: int
+    column: int
+
+
 # Any of these nodes can be used where an expression is expected.
 Expression: TypeAlias = (
-    IntegerLiteral | BooleanLiteral | Name | UnaryExpression | BinaryExpression
+    IntegerLiteral
+    | BooleanLiteral
+    | Name
+    | UnaryExpression
+    | BinaryExpression
+    | Call
 )
 
 
@@ -70,10 +83,46 @@ class SayStatement:
     column: int
 
 
-Statement: TypeAlias = LetStatement | SayStatement
+@dataclass(frozen=True)
+class ReturnStatement:
+    expression: Expression
+    line: int
+    column: int
+
+
+@dataclass(frozen=True)
+class IfStatement:
+    condition: Expression
+    then_body: tuple[Statement, ...]
+    # None means the source did not have an 'else' block.
+    else_body: tuple[Statement, ...] | None
+    line: int
+    column: int
+
+
+@dataclass(frozen=True)
+class WhileStatement:
+    condition: Expression
+    body: tuple[Statement, ...]
+    line: int
+    column: int
+
+
+Statement: TypeAlias = (
+    LetStatement | SayStatement | ReturnStatement | IfStatement | WhileStatement
+)
+
+
+@dataclass(frozen=True)
+class FunctionDefinition:
+    name: Name
+    parameters: tuple[Name, ...]
+    body: tuple[Statement, ...]
+    line: int
+    column: int
 
 
 @dataclass(frozen=True)
 class Program:
-    # Keep the statements in the order they appear in the source.
-    items: tuple[Statement, ...]
+    # Keep statements and function definitions in source order.
+    items: tuple[Statement | FunctionDefinition, ...]

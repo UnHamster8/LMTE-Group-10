@@ -1,7 +1,7 @@
 """Recursive-descent parser for the Pebble grammar."""
 
 from collections.abc import Callable
-from typing import cast
+from typing import TypeVar, cast
 
 from pebble import ast_nodes as ast
 from pebble.errors import ParseError
@@ -15,6 +15,8 @@ _ORDERING_OPERATORS = (
     TokenKind.GREATER_EQUAL,
 )
 
+_ListItem = TypeVar("_ListItem")
+
 
 class Parser:
     def __init__(self, tokens: list[Token]) -> None:
@@ -25,10 +27,14 @@ class Parser:
     def parse(self) -> ast.Program:
         """Parse all tokens from the lexer and return the program AST."""
         self.current = 0
-        items: list[ast.Statement] = []
+        items: list[ast.Statement | ast.FunctionDefinition] = []
         # The lexer adds EOF so we know when the source ends.
         while self._peek().kind != TokenKind.EOF:
-            items.append(self._statement())
+            # Only the top level can start a function definition.
+            if self._peek().kind == TokenKind.FUNC:
+                items.append(self._function())
+            else:
+                items.append(self._statement())
         return ast.Program(tuple(items))
 
     def _peek(self) -> Token:
@@ -62,6 +68,38 @@ class Parser:
         token = self._expect(TokenKind.NAME, description)
         return ast.Name(token.lexeme, token.line, token.column)
 
+    def _parenthesized_list(
+        self, read_item: Callable[[], _ListItem]
+    ) -> tuple[_ListItem, ...]:
+        # The opening '(' was read already. A ')' here means the list is empty.
+        if self._match(TokenKind.RIGHT_PAREN):
+            return ()
+
+        items = [read_item()]
+        while self._match(TokenKind.COMMA):
+            items.append(read_item())
+        self._expect(TokenKind.RIGHT_PAREN, "',' or ')'")
+        return tuple(items)
+
+    def _function(self) -> ast.FunctionDefinition:
+        start = self._expect(TokenKind.FUNC, "'func'")
+        name = self._name("a function name")
+        self._expect(TokenKind.LEFT_PAREN, "'(' after function name")
+        parameters = self._parenthesized_list(lambda: self._name("a parameter name"))
+        self._expect(TokenKind.DO, "'do' before function body")
+        body = self._block(TokenKind.END)
+        self._expect(TokenKind.END, "'end' to close function")
+        return ast.FunctionDefinition(name, parameters, body, start.line, start.column)
+
+    def _block(self, *terminators: TokenKind) -> tuple[ast.Statement, ...]:
+        statements: list[ast.Statement] = []
+        # Leave 'else' or 'end' for the statement that opened this block.
+        # At EOF, that statement can report which 'end' is missing.
+        stops = (*terminators, TokenKind.EOF)
+        while self._peek().kind not in stops:
+            statements.append(self._statement())
+        return tuple(statements)
+
     def _statement(self) -> ast.Statement:
         # Save the keyword's position for the statement node.
         start = self._peek()
@@ -77,6 +115,37 @@ class Parser:
             self._expect(TokenKind.SEMICOLON, "';' after 'say' expression")
             return ast.SayStatement(expression, start.line, start.column)
 
+        if self._match(TokenKind.RETURN):
+            expression = self._expression()
+            self._expect(TokenKind.SEMICOLON, "';' after return value")
+            return ast.ReturnStatement(expression, start.line, start.column)
+
+        if self._match(TokenKind.IF):
+            condition = self._expression()
+            self._expect(TokenKind.DO, "'do' after 'if' condition")
+            # The first part of an 'if' can end at either 'else' or 'end'.
+            then_body = self._block(TokenKind.ELSE, TokenKind.END)
+            else_body = None
+            if self._match(TokenKind.ELSE):
+                else_body = self._block(TokenKind.END)
+            self._expect(TokenKind.END, "'end' to close 'if'")
+            return ast.IfStatement(
+                condition, then_body, else_body, start.line, start.column
+            )
+
+        if self._match(TokenKind.WHILE):
+            condition = self._expression()
+            self._expect(TokenKind.DO, "'do' after 'while' condition")
+            body = self._block(TokenKind.END)
+            self._expect(TokenKind.END, "'end' to close 'while'")
+            return ast.WhileStatement(condition, body, start.line, start.column)
+
+        if start.kind == TokenKind.FUNC:
+            raise ParseError(
+                "Function definitions are only allowed at the top level",
+                start.line,
+                start.column,
+            )
         raise self._expected("a statement")
 
     def _expression(self) -> ast.Expression:
@@ -148,6 +217,11 @@ class Parser:
             return expression
 
         if (token := self._match(TokenKind.NAME)) is not None:
-            return ast.Name(token.lexeme, token.line, token.column)
+            name = ast.Name(token.lexeme, token.line, token.column)
+            # A name followed by '(' is a call, like twice(6).
+            if self._match(TokenKind.LEFT_PAREN):
+                arguments = self._parenthesized_list(self._expression)
+                return ast.Call(name, arguments, name.line, name.column)
+            return name
 
         raise self._expected("an expression")

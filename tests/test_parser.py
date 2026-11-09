@@ -74,6 +74,66 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(program.items[0], ast.LetStatement)
         self.assertIsInstance(program.items[-1], ast.SayStatement)
 
+    def test_control_flow_example_parses(self):
+        example = Path(__file__).resolve().parents[1] / "examples" / "control_flow.peb"
+        assignment, loop, skipped = parse(example.read_text(encoding="utf-8")).items
+
+        self.assertIsInstance(assignment, ast.LetStatement)
+        self.assertIsInstance(loop, ast.WhileStatement)
+        self.assertEqual(loop.condition.operator, TokenKind.GREATER)
+        branch, update = loop.body
+        self.assertIsInstance(branch, ast.IfStatement)
+        self.assertEqual(branch.condition.operator, TokenKind.EQUAL)
+        self.assertEqual(branch.then_body[0].expression.value, 20)
+        self.assertEqual(branch.else_body[0].expression.value, "n")
+        self.assertIsInstance(update, ast.LetStatement)
+        self.assertIsInstance(skipped.condition, ast.BooleanLiteral)
+        self.assertFalse(skipped.condition.value)
+
+    def test_nested_if_uses_its_own_end(self):
+        outer, = parse(
+            "if true do if false do say 1; end else say 2; end"
+        ).items
+        inner, = outer.then_body
+        self.assertIsNone(inner.else_body)
+        self.assertEqual(outer.else_body[0].expression.value, 2)
+
+    def test_function_example_parses(self):
+        example = Path(__file__).resolve().parents[1] / "examples" / "functions.peb"
+        function, statement = parse(example.read_text(encoding="utf-8")).items
+
+        self.assertIsInstance(function, ast.FunctionDefinition)
+        self.assertEqual(function.name.value, "twice")
+        self.assertEqual([name.value for name in function.parameters], ["x"])
+        returned, = function.body
+        self.assertIsInstance(returned, ast.ReturnStatement)
+        self.assertEqual(returned.expression.operator, TokenKind.STAR)
+        self.assertIsInstance(statement.expression, ast.Call)
+        self.assertEqual(statement.expression.callee.value, "twice")
+        self.assertEqual(statement.expression.arguments[0].value, 6)
+
+    def test_empty_lists_and_multiple_arguments(self):
+        zero, add, statement = parse(
+            "func zero() do return 0; end "
+            "func add(a, b) do return a + b; end "
+            "say add(zero(), -zero());"
+        ).items
+
+        self.assertEqual(zero.parameters, ())
+        self.assertEqual([name.value for name in add.parameters], ["a", "b"])
+        first, second = statement.expression.arguments
+        self.assertEqual(first.callee.value, "zero")
+        self.assertEqual(first.arguments, ())
+        # The minus wraps the call, so the call is read first.
+        self.assertEqual(second.operator, TokenKind.MINUS)
+        self.assertIsInstance(second.operand, ast.Call)
+
+    def test_unclosed_loop_reports_missing_end(self):
+        with self.assertRaises(ParseError) as raised:
+            parse("while true do\n    say 1;\n")
+        self.assertIn("'end' to close 'while'", raised.exception.message)
+        self.assertEqual((raised.exception.line, raised.exception.column), (3, 1))
+
     def test_syntax_errors_have_reason_and_location(self):
         # Each case gives the source, part of the error message, and its location.
         cases = (

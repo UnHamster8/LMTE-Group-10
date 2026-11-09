@@ -1,11 +1,11 @@
 # Pebble — Group 10
 
-A Python 3 interpreter project for the Pebble language. This starter implements
-the lexer and basic expression and statement parsing.
+A Python 3 interpreter project for the Pebble language. The lexer and parser
+are implemented.
 
-**Current status:** the lexer tokenizes all examples. The parser builds an AST
-for `let`, `say` and basic expressions. Control flow, functions, semantic
-validation and execution are planned.
+**Current status:** the lexer and parser can build an AST for all three example
+programs, including control flow and functions. The command-line entry point
+prints tokens. Semantic validation and execution are planned.
 
 ## Requirements and running
 
@@ -32,12 +32,12 @@ pebble/
     tokens.py             Token kinds, keyword lookup and Token data class
     lexer.py              Hand-written finite-state scanner
     errors.py             Shared error format, lexical errors and syntax errors
-    ast_nodes.py          AST nodes for basic expressions and statements
+    ast_nodes.py          AST nodes for expressions, statements and functions
     parser.py             Recursive-descent parser
     evaluator.py          Evaluation interface for a later stage (placeholder)
 examples/                 Sample Pebble source files
 tests/test_lexer.py       Lexical rules, source positions and error tests
-tests/test_parser.py      Basic AST structure, precedence and syntax errors
+tests/test_parser.py      Example programs, AST structure and syntax errors
 tests/test_cli.py         Command-line token output and error tests
 ```
 
@@ -86,29 +86,30 @@ The remaining pipeline is:
 source → Lexer → tokens → Parser → AST → validation → Evaluator → output
 ```
 
-`Parser(tokens).parse()` returns an `ast_nodes.Program` for the syntax in
-`examples/basic.peb`. Its `items` are statements in source order. A syntax
-error raises `ParseError` with a reason and one-based line and column.
-`Evaluator().evaluate(program)` remains a placeholder.
+`Parser(tokens).parse()` returns an `ast_nodes.Program`. Its `items` hold
+statements and top-level function definitions in source order. The parser
+handles `if` with an optional `else`, `while`, function definitions, calls
+and `return`. A syntax error raises `ParseError` with a reason, line and
+column. The semantic stage checks where `return` can appear.
+
+Expressions follow calls and parentheses, unary minus, multiplication and
+division, addition and subtraction, ordering comparisons, then equality.
+Binary operators associate left. Ordering comparisons cannot be chained.
 
 ## Planned execution rules
 
-The following rules come from the design plan and are **not implemented yet**:
+The following rules describe planned validation and evaluation:
 
 - `let` creates or reassigns a variable; reading an unassigned name is an error.
-- Expressions follow call/parentheses, unary minus, multiplication/division,
-  addition/subtraction, ordering, then equality precedence. Binary operators
-  associate left; chained ordering expressions are rejected.
 - Arithmetic and ordering need integers; equality needs matching types. Integer
   division truncates towards zero. Conditions need Booleans.
 - `say` prints one value per line, with Booleans written as `true` or `false`.
 - `if` optionally has `else`; `while` may execute zero times.
-- Functions are top-level definitions preceding their use. Calls read locals
-  before globals, and local assignments do not modify globals. Nested functions,
-  duplicate parameter names and `return` outside functions are rejected.
+- Functions are defined before use. Calls read locals before globals, and local
+  assignments do not modify globals. Validation rejects duplicate parameter
+  names and `return` outside functions.
 - Undefined names/functions, division by zero, wrong argument counts, invalid
   types and functions finishing without returning a value produce errors.
 
-The examples are input for lexical inspection now and future parser/evaluator
-integration. Their comments describe the output expected after execution is
-implemented.
+The parser tests use all three example programs. Comments in the examples show
+the expected output after execution is implemented.
