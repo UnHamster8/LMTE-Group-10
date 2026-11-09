@@ -134,6 +134,33 @@ class ParserTests(unittest.TestCase):
         self.assertIn("'end' to close 'while'", raised.exception.message)
         self.assertEqual((raised.exception.line, raised.exception.column), (3, 1))
 
+    def test_empty_blocks_and_optional_else(self):
+        no_else, empty_else, loop, function = parse(
+            "if true do end if false do else end "
+            "while false do end func empty() do end"
+        ).items
+
+        self.assertEqual(no_else.then_body, ())
+        self.assertIsNone(no_else.else_body)
+        # An empty else block is different from leaving it out.
+        self.assertEqual(empty_else.else_body, ())
+        self.assertEqual(loop.body, ())
+        self.assertEqual(function.body, ())
+
+    def test_ast_keeps_context_checks_for_validation(self):
+        returned, function, statement = parse(
+            "return 1;\nfunc f(x, x) do return x; end\nsay f();"
+        ).items
+
+        # The validator needs these nodes to check placement and duplicate names.
+        self.assertIsInstance(returned, ast.ReturnStatement)
+        self.assertEqual((returned.line, returned.column), (1, 1))
+        self.assertEqual(
+            function.parameters, (ast.Name("x", 2, 8), ast.Name("x", 2, 11))
+        )
+        self.assertEqual(statement.expression.callee, ast.Name("f", 3, 5))
+        self.assertEqual(statement.expression.arguments, ())
+
     def test_syntax_errors_have_reason_and_location(self):
         # Each case gives the source, part of the error message, and its location.
         cases = (
@@ -142,6 +169,21 @@ class ParserTests(unittest.TestCase):
             ("say (1 + 2;", "')' after expression", 1, 11),
             ("say 1 < 2 < 3;", "Chained ordering comparisons", 1, 11),
             ("say 1; end", "a statement", 1, 8),
+
+            # Check block keywords and where functions can be defined.
+            ("if true say 1;", "'do' after 'if'", 1, 9),
+            ("if true do else else end", "a statement", 1, 17),
+            ("while true do else end", "a statement", 1, 15),
+            ("while true do\n  func f() do end\nend", "top level", 2, 3),
+            ("func f(x) return x; end", "'do' before function body", 1, 11),
+            ("func f() do\n    return 1;\n", "'end' to close function", 3, 1),
+            ("func f() do return ; end", "an expression", 1, 20),
+
+            # Check the separators in parameter and argument lists.
+            ("func f(x,) do end", "a parameter name", 1, 10),
+            ("func f(x y) do end", "',' or ')'", 1, 10),
+            ("say f(1,);", "an expression", 1, 9),
+            ("say f(1;", "',' or ')'", 1, 8),
         )
         for source, message, line, column in cases:
             with self.subTest(source=source):

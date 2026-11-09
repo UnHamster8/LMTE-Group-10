@@ -96,6 +96,51 @@ Expressions follow calls and parentheses, unary minus, multiplication and
 division, addition and subtraction, ordering comparisons, then equality.
 Binary operators associate left. Ordering comparisons cannot be chained.
 
+## AST handoff
+
+Start a Python session from the project directory and run this code to
+inspect the tree for a sample program.
+
+```python
+from pathlib import Path
+
+from pebble.lexer import Lexer
+from pebble.parser import Parser
+
+source = Path("examples/functions.peb").read_text(encoding="utf-8")
+program = Parser(Lexer(source).tokenize()).parse()
+print(program)
+```
+
+The printed program starts with a `FunctionDefinition` for `twice`, followed by a
+`SayStatement` whose expression is a `Call`. The main fields for validation and
+evaluation are:
+
+| AST node | Fields to read |
+| --- | --- |
+| `Program` | `items` contains statements and function definitions in source order. |
+| `IntegerLiteral`, `BooleanLiteral`, `Name` | `value` is an integer, Boolean, or name string. |
+| `UnaryExpression`, `BinaryExpression` | `operator` is a `TokenKind`. The child expressions are `operand` or `left` and `right`. |
+| `LetStatement` | `name.value` is the variable name. `expression` is the right side of the assignment. |
+| `SayStatement`, `ReturnStatement` | `expression` is the value to evaluate. |
+| `IfStatement` | `condition`, `then_body`, and `else_body`. An omitted `else` is `None`. An empty `else` is `()`. |
+| `WhileStatement` | `condition` and `body`. |
+| `FunctionDefinition` | `name.value`, `parameters` as `Name` nodes, and `body`. |
+| `Call` | `callee.value` is the function name. `arguments` holds the expression nodes in call order. |
+
+Bodies, parameters, arguments and top-level items are tuples. Each statement,
+expression and function definition has a one-based `line` and `column`. For an
+operation these point to the operator. Parameter and call names also have
+their own positions.
+
+The parser checks the shape of the program. For example, it rejects a
+function definition inside a block. The AST still includes a top-level
+`return` or duplicate parameter names so the validator can report those errors
+at the right locations.
+
+Run just the parser tests with `python3 -m unittest discover -s tests -p test_parser.py -v`.
+They cover all three example files, AST structure and error positions.
+
 ## Planned execution rules
 
 The following rules describe planned validation and evaluation:
