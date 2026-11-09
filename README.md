@@ -36,6 +36,7 @@ pebble/
     evaluator.py          Evaluation interface for a later stage (placeholder)
 examples/                 Sample Pebble source files
 tests/test_lexer.py       Lexical rules, source positions and error tests
+tests/test_cli.py         Command-line token output and error tests
 ```
 
 ## Lexical specification
