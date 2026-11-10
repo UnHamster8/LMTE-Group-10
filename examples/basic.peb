@@ -1,0 +1,8 @@
+// Variables, precedence and reassignment.
+let score = 10;
+let score = score + 5;
+say score; // Expected output after evaluation: 15
+say 2 + 3 * 4; // 14
+say (2 + 3) * 4; // 20
+say 5 > 2; // true
+say -5 / 2; // -2

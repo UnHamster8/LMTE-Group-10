@@ -1,0 +1,15 @@
+// Expected output after evaluation: 3, 20, 1 (one value per line).
+let n = 3;
+while n > 0 do
+    if n == 2 do
+        say 20;
+    else
+        say n;
+    end
+    let n = n - 1;
+end
+
+// A false condition skips the loop body.
+while false do
+    say 99;
+end

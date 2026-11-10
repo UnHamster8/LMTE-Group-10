@@ -1,0 +1,198 @@
+"""Test syntax and AST structure using real Pebble lexer output."""
+
+from pathlib import Path
+import unittest
+
+from pebble import ast_nodes as ast
+from pebble.errors import ParseError
+from pebble.lexer import Lexer
+from pebble.parser import Parser
+from pebble.tokens import TokenKind
+
+
+def parse(source: str) -> ast.Program:
+    # Run the source through the lexer before testing the parser.
+    return Parser(Lexer(source).tokenize()).parse()
+
+
+class ParserTests(unittest.TestCase):
+    def test_empty_source(self):
+        self.assertEqual(parse("// just a comment"), ast.Program(()))
+
+    def test_let_records_name_value_and_source_positions(self):
+        # The comment takes up the first line, so 'let' starts on line 2.
+        self.assertEqual(
+            parse("// note\nlet score = 10;"),
+            ast.Program(
+                (
+                    ast.LetStatement(
+                        ast.Name("score", 2, 5), ast.IntegerLiteral(10, 2, 13), 2, 1
+                    ),
+                )
+            ),
+        )
+
+    def test_operator_precedence(self):
+        statement, = parse("say 1 + 2 * 3 < 8 == true;").items
+        # Start at '==' and check how the other operators fit inside it.
+        equality = statement.expression
+        self.assertEqual(equality.operator, TokenKind.EQUAL)
+        self.assertEqual(equality.right, ast.BooleanLiteral(True, 1, 22))
+        comparison = equality.left
+        self.assertEqual(comparison.operator, TokenKind.LESS)
+        addition = comparison.left
+        self.assertEqual(addition.operator, TokenKind.PLUS)
+        self.assertEqual(addition.right.operator, TokenKind.STAR)
+
+    def test_parentheses_and_unary_minus(self):
+        statement, = parse("say -(2 + 3) * --4;").items
+        product = statement.expression
+        self.assertEqual(product.operator, TokenKind.STAR)
+        self.assertEqual(product.left.operator, TokenKind.MINUS)
+        self.assertEqual(product.left.operand.operator, TokenKind.PLUS)
+        self.assertEqual(product.right.operator, TokenKind.MINUS)
+        self.assertEqual(product.right.operand.operator, TokenKind.MINUS)
+
+    def test_repeated_binary_operators_associate_left(self):
+        for source, kind in (
+            ("say 10 - 3 - 2;", TokenKind.MINUS),
+            ("say 8 / 4 / 2;", TokenKind.SLASH),
+            ("say true == false != true;", TokenKind.EQUAL),
+        ):
+            with self.subTest(source=source):
+                statement, = parse(source).items
+                expression = statement.expression
+                # The first operation should be on the left side of the next one.
+                self.assertIsInstance(expression.left, ast.BinaryExpression)
+                self.assertEqual(expression.left.operator, kind)
+                self.assertNotIsInstance(expression.right, ast.BinaryExpression)
+
+    def test_basic_example_parses(self):
+        example = Path(__file__).resolve().parents[1] / "examples" / "basic.peb"
+        program = parse(example.read_text(encoding="utf-8"))
+        self.assertEqual(len(program.items), 7)
+        self.assertIsInstance(program.items[0], ast.LetStatement)
+        self.assertIsInstance(program.items[-1], ast.SayStatement)
+
+    def test_control_flow_example_parses(self):
+        example = Path(__file__).resolve().parents[1] / "examples" / "control_flow.peb"
+        assignment, loop, skipped = parse(example.read_text(encoding="utf-8")).items
+
+        self.assertIsInstance(assignment, ast.LetStatement)
+        self.assertIsInstance(loop, ast.WhileStatement)
+        self.assertEqual(loop.condition.operator, TokenKind.GREATER)
+        branch, update = loop.body
+        self.assertIsInstance(branch, ast.IfStatement)
+        self.assertEqual(branch.condition.operator, TokenKind.EQUAL)
+        self.assertEqual(branch.then_body[0].expression.value, 20)
+        self.assertEqual(branch.else_body[0].expression.value, "n")
+        self.assertIsInstance(update, ast.LetStatement)
+        self.assertIsInstance(skipped.condition, ast.BooleanLiteral)
+        self.assertFalse(skipped.condition.value)
+
+    def test_nested_if_uses_its_own_end(self):
+        outer, = parse(
+            "if true do if false do say 1; end else say 2; end"
+        ).items
+        inner, = outer.then_body
+        self.assertIsNone(inner.else_body)
+        self.assertEqual(outer.else_body[0].expression.value, 2)
+
+    def test_function_example_parses(self):
+        example = Path(__file__).resolve().parents[1] / "examples" / "functions.peb"
+        function, statement = parse(example.read_text(encoding="utf-8")).items
+
+        self.assertIsInstance(function, ast.FunctionDefinition)
+        self.assertEqual(function.name.value, "twice")
+        self.assertEqual([name.value for name in function.parameters], ["x"])
+        returned, = function.body
+        self.assertIsInstance(returned, ast.ReturnStatement)
+        self.assertEqual(returned.expression.operator, TokenKind.STAR)
+        self.assertIsInstance(statement.expression, ast.Call)
+        self.assertEqual(statement.expression.callee.value, "twice")
+        self.assertEqual(statement.expression.arguments[0].value, 6)
+
+    def test_empty_lists_and_multiple_arguments(self):
+        zero, add, statement = parse(
+            "func zero() do return 0; end "
+            "func add(a, b) do return a + b; end "
+            "say add(zero(), -zero());"
+        ).items
+
+        self.assertEqual(zero.parameters, ())
+        self.assertEqual([name.value for name in add.parameters], ["a", "b"])
+        first, second = statement.expression.arguments
+        self.assertEqual(first.callee.value, "zero")
+        self.assertEqual(first.arguments, ())
+        # The minus wraps the call, so the call is read first.
+        self.assertEqual(second.operator, TokenKind.MINUS)
+        self.assertIsInstance(second.operand, ast.Call)
+
+    def test_unclosed_loop_reports_missing_end(self):
+        with self.assertRaises(ParseError) as raised:
+            parse("while true do\n    say 1;\n")
+        self.assertIn("'end' to close 'while'", raised.exception.message)
+        self.assertEqual((raised.exception.line, raised.exception.column), (3, 1))
+
+    def test_empty_blocks_and_optional_else(self):
+        no_else, empty_else, loop, function = parse(
+            "if true do end if false do else end "
+            "while false do end func empty() do end"
+        ).items
+
+        self.assertEqual(no_else.then_body, ())
+        self.assertIsNone(no_else.else_body)
+        # An empty else block is different from leaving it out.
+        self.assertEqual(empty_else.else_body, ())
+        self.assertEqual(loop.body, ())
+        self.assertEqual(function.body, ())
+
+    def test_ast_keeps_context_checks_for_validation(self):
+        returned, function, statement = parse(
+            "return 1;\nfunc f(x, x) do return x; end\nsay f();"
+        ).items
+
+        # The validator needs these nodes to check placement and duplicate names.
+        self.assertIsInstance(returned, ast.ReturnStatement)
+        self.assertEqual((returned.line, returned.column), (1, 1))
+        self.assertEqual(
+            function.parameters, (ast.Name("x", 2, 8), ast.Name("x", 2, 11))
+        )
+        self.assertEqual(statement.expression.callee, ast.Name("f", 3, 5))
+        self.assertEqual(statement.expression.arguments, ())
+
+    def test_syntax_errors_have_reason_and_location(self):
+        # Each case gives the source, part of the error message, and its location.
+        cases = (
+            ("let x = ;", "an expression", 1, 9),
+            ("say 1", "';' after 'say' expression", 1, 6),
+            ("say (1 + 2;", "')' after expression", 1, 11),
+            ("say 1 < 2 < 3;", "Chained ordering comparisons", 1, 11),
+            ("say 1; end", "a statement", 1, 8),
+
+            # Check block keywords and where functions can be defined.
+            ("if true say 1;", "'do' after 'if'", 1, 9),
+            ("if true do else else end", "a statement", 1, 17),
+            ("while true do else end", "a statement", 1, 15),
+            ("while true do\n  func f() do end\nend", "top level", 2, 3),
+            ("func f(x) return x; end", "'do' before function body", 1, 11),
+            ("func f() do\n    return 1;\n", "'end' to close function", 3, 1),
+            ("func f() do return ; end", "an expression", 1, 20),
+
+            # Check the separators in parameter and argument lists.
+            ("func f(x,) do end", "a parameter name", 1, 10),
+            ("func f(x y) do end", "',' or ')'", 1, 10),
+            ("say f(1,);", "an expression", 1, 9),
+            ("say f(1;", "',' or ')'", 1, 8),
+        )
+        for source, message, line, column in cases:
+            with self.subTest(source=source):
+                with self.assertRaises(ParseError) as raised:
+                    parse(source)
+                self.assertIn(message, raised.exception.message)
+                self.assertEqual(
+                    (raised.exception.line, raised.exception.column), (line, column)
+                )
+                self.assertTrue(
+                    str(raised.exception).startswith(f"Syntax error at {line}:{column}: ")
+                )
